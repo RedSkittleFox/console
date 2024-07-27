@@ -5,7 +5,6 @@
 #include <string>
 #include <string_view>
 #include <span>
-#include <any>
 #include <expected>
 #include <vector>
 #include <type_traits>
@@ -23,12 +22,15 @@
 
 namespace fox::console
 {
+	/// @brief Defines a type of object to be thrown as exception.
+	/// It reports errors that are a consequence of invalid console::variable or console::function registration.
 	class register_exception : public std::runtime_error
 	{
 	public:
 		using runtime_error::runtime_error;
 	};
 
+	/// @cond undocumented
 	namespace details
 	{
 		enum class console_entity_type
@@ -40,61 +42,90 @@ namespace fox::console
 
 		class console_base;
 	}
+	/// @endcond 
 
+	/// @brief Defines an error type returned when command is invoked with invalid permissions.
 	struct invoke_error_invalid_permission
 	{
+		/// @brief Permissions required by the command.
 		std::size_t expected;
+		/// @brief Permissions provided by the caller.
 		std::size_t actual;
 
+		/// @brief Formatted string message for the error.
+		///	@returns Message string
 		[[nodiscard]] std::string message() const noexcept
 		{
 			return (std::ostringstream() << "Invalid permission level. Expected '" << expected << "', actual '" << actual << "'.").str();
 		}
 	};
 
+	/// @brief Defines an error type returned when invalid number of arguments is passed.
 	struct invoke_error_invalid_number_of_arguments
 	{
+		/// @brief Number of arguments required by the command.
 		std::size_t expected;
+		/// @brief Number of arguments provided by the caller.
 		std::size_t actual;
 
+		/// @brief Formatted string message for the error.
+		///	@returns Message string
 		[[nodiscard]] std::string message() const noexcept
 		{
 			return (std::ostringstream() << "Invalid number of arguments. Expected '" << expected << "', actual '" << actual << "'.").str();
 		}
 	};
 
+	/// @brief Defines an error type returned when parsing of the return value fails.
 	struct invoke_error_return_value_parsing
 	{
+		/// @brief Type of variable which the parsing failed for.
 		std::string from_type;
 
+		/// @brief Formatted string message for the error.
+		///	@returns Message string
 		[[nodiscard]] std::string message() const noexcept
 		{
 			return (std::ostringstream() << "Failed whilst parsing return value from type '" << from_type << "'.").str();
 		}
 	};
 
+	/// @brief Defines an error type returned when parsing of the argument fails.
 	struct invoke_error_argument_parsing
 	{
+		/// @brief String which was being parsed.
 		std::string from;
+
+		/// @brief Data type which the string was parsed into.
 		std::string to_type;
 
+		/// @brief Formatted string message for the error.
+		///	@returns Message string
 		[[nodiscard]] std::string message() const noexcept
 		{
 			return (std::ostringstream() << "Failed whilst parsing '" << from << "' to '" << to_type << "'.").str();
 		}
 	};
 
+	/// @brief Defines an error type returned when invalid command is invoked.
 	struct invoke_error_invalid_command
 	{
+		/// @brief Command name.
 		std::string name;
+
+		/// @brief Number of arguments used.
 		std::size_t number_of_arguments;
 
+		/// @brief Formatted string message for the error.
+		///	@returns Message string
 		[[nodiscard]] std::string message() const noexcept
 		{
 			return (std::ostringstream() << "Unknown command '" << name << "' taking '" << number_of_arguments << "' arguments.").str();
 		}
 	};
 
+	/// @brief Generalized version of the invoke error.
+	/// Use std::holds_alternative together with std::get to extract exact error type.
 	struct invoke_error : std::variant<
 		invoke_error_invalid_permission,
 		invoke_error_invalid_number_of_arguments,
@@ -106,43 +137,41 @@ namespace fox::console
 		using variant::variant;
 
 	public:
+		/// @brief Formatted string message for the error.
+		///	@returns Message string
 		[[nodiscard]] std::string message() const noexcept
 		{
 			return std::visit([](auto&& cmd) -> std::string { return cmd.message(); }, *this);
 		}
 
+	public:
+		/// @cond undocumented
+		// Internal helper
 		template<class T>
-		[[nodiscard]] static auto unexpected(T&& v)
+		[[nodiscard]] static auto unexpected(T&& v) // TODO: Hide this
 		{
 			return std::unexpected(invoke_error(std::in_place_type<T>, std::forward<T>(v)));
 		}
+		/// @endcond undocumented
 	};
 
+	/// @brief Output returned by the callee during correct execution.
 	struct invoke_output
 	{
+		/// @brief Regular output. Equivalent to stdout
 		std::string out;
+		/// @brief Error output. Equivalent to stderr.
 		std::string error;
 
-		invoke_output() = default;
-		invoke_output(const invoke_output&) = default;
-		invoke_output(invoke_output&&) noexcept = default;
-		invoke_output& operator=(const invoke_output&) = default;
-		invoke_output& operator=(invoke_output&&) noexcept = default;
-		~invoke_output() noexcept = default;
-
-		invoke_output(std::string_view out) : out(static_cast<std::string>(out)) {}
-		invoke_output(std::string_view out, std::string_view error) : out(static_cast<std::string>(out)), error(static_cast<std::string>(error)) {}
-
-		operator const std::string& () const noexcept
-		{
-			return out;
-		} 
-
+		/// @brief Compares lhs and rhs lexicographically by synthetic three-way comparison.
 		auto operator<=>(const invoke_output&) const = default;
 	};
 
+	/// @brief std::expected result type returned by the function invocation. 
 	using invoke_result = std::expected<invoke_output, invoke_error>;
 
+	/// @brief Singleton responsible for managing console::function and console::variable tracking and invoking.
+	///	@note Library user is responsible for implementing the ``console_manager::instance()`` handler somewhere in their codebase.
 	class console_manager
 	{
 		friend class details::console_base;
@@ -150,14 +179,24 @@ namespace fox::console
 		std::unordered_multimap<std::string_view, details::console_base*> commands_;
 
 	public:
+		/// @brief Default constructor.
 		console_manager() = default;
 
+		/// @brief Copy constructor is deleted.
 		console_manager(const console_manager&) = delete;
+
+		/// @brief Move constructor is deleted.
 		console_manager(console_manager&&) noexcept = delete;
 
+		/// @brief Copy assignment operator is deleted.
+		///	@returns *this
 		console_manager& operator=(const console_manager&) = delete;
+
+		/// @brief Move assignment operator is deleted.
+		///	@returns *this
 		console_manager& operator=(console_manager&&) noexcept = delete;
 
+		/// @brief Destructor.
 		~console_manager() noexcept = default;
 
 	private:
@@ -165,9 +204,19 @@ namespace fox::console
 		void unregister_command(details::console_base* ptr) noexcept;
 
 	public:
+		/// @brief Invokes the specified command with the set of parameters. Returns expected value `invoke_output` if call was successful, unexpected value `invoke_error` otherwise.
+		///	@param command	Command to be invoked
+		///	@param arguments Arguments to be used during invocation
+		///	@param permissions Permission level used to invoke the command
+		///	@returns `std::expected<invoke_output, invoke_error>`
 		[[nodiscard]] invoke_result invoke(std::string_view command, std::span<std::string_view> arguments,
 			std::size_t permissions = std::numeric_limits<std::size_t>::max());
 
+		/// @brief Invokes the specified command with the set of parameters. Returns expected value `invoke_output` if call was successful, unexpected value `invoke_error` otherwise.
+		///	@param command	Command to be invoked
+		///	@param arguments Arguments to be used during invocation
+		///	@param permissions Permission level used to invoke the command
+		///	@returns `std::expected<invoke_output, invoke_error>`
 		[[nodiscard]] invoke_result invoke(std::string_view command, std::initializer_list<std::string_view> arguments,
 			std::size_t permissions = std::numeric_limits<std::size_t>::max())
 		{
@@ -175,6 +224,12 @@ namespace fox::console
 			return this->invoke(command, args, permissions);
 		}
 
+		/// @brief Invokes the specified command with the set of parameters. Returns expected value `invoke_output` if call was successful, unexpected value `invoke_error` otherwise.
+		/// @tparam Range Type of the arguments range
+		///	@param command	Command to be invoked
+		///	@param r Arguments to be used during invocation
+		///	@param permissions Permission level used to invoke the command
+		///	@returns `std::expected<invoke_output, invoke_error>`
 		template<class Range>
 		[[nodiscard]] invoke_result invoke(std::string_view command, const Range& r, 
 			std::size_t permissions = std::numeric_limits<std::size_t>::max())
@@ -192,10 +247,17 @@ namespace fox::console
 		}
 
 	public:
+		/// @brief Command line input parser.
+		/// @details Multiple commands can be chained together using `;` character.
+		/// Quotation marks "" can be used to pass multiword arguments.
+		///	@param cmd Command string to be parsed.
+		///	@param permissions Permission level used to invoke the command
+		///	@returns std::vector of `std::expected<invoke_output, invoke_error>` of resulting function calls.
 		[[nodiscard]] std::vector<invoke_result> execute(std::string_view cmd, 
 			std::size_t permissions = std::numeric_limits<std::size_t>::max()
 		)
 		{
+			// White space characters
 			constexpr std::string_view ws = " \t\n\r\f\v";
 
 			std::vector<invoke_result> invoke_results;
@@ -208,21 +270,18 @@ namespace fox::console
 			std::size_t k = 0;
 			std::size_t i = 0;
 
+			// Tries to push currently parsed string into vector
 			auto push_arg = [&]()
 				{
 					std::string_view sv = cmd.substr(k, i - k);
-					if (std::empty(sv))
-						return;
 
-					if (std::size(sv) == 1 && ws.find_first_of(sv[0]) != std::string_view::npos)
-					{
-						return;
-					}
-
-					sv.remove_prefix(sv.find_first_not_of(ws));
+					// Trim the string
+					if(auto e = sv.find_first_not_of(ws); e != std::string_view::npos)
+						sv.remove_prefix(e);
 					if(auto e = sv.find_last_not_of(ws); e != std::string_view::npos)
 						sv = sv.substr(0, e + 1);
 
+					// Don't insert empty (after the trim)
 					if(!std::empty(sv))
 						args.push_back(sv);
 				};
@@ -231,7 +290,7 @@ namespace fox::console
 			for(; i < std::size(cmd); ++i)
 			{
 				const char c = cmd[i];
-				if(state_escaped == false)
+				if(state_escaped == false) // Parse if outside of quotation marks
 				{
 					if(c == '"')
 					{
@@ -260,8 +319,9 @@ namespace fox::console
 						k = i + 1;
 					}
 				}
-				else
+				else // inside quotation marks
 				{
+					// Leave only if \", make sure \ itself isn't escaped - \\"
 					if (((i < 2 || cmd[i - 2] == '\\' ) || cmd[i - 1] != '\\') && cmd[i] == '"')
 					{
 						// Don't use push_arg(), we don't want to trim the string
@@ -272,9 +332,9 @@ namespace fox::console
 						{
 							if(j + 1 < std::size(str) && str[j] == '\\')
 							{
-								str[j] = '\0';
+								str[j] = '\0'; // Delete these later
 
-								switch (str[j + 1])
+								switch (str[j + 1]) // 
 								{
 								case '\n':
 									str[j + 1] = '\n';
@@ -301,6 +361,7 @@ namespace fox::console
 				}
 			}
 
+			// Try to push remaining arg onto the stack and invoke the command if any left
 			push_arg();
 			if(!std::empty(args))
 			{
@@ -315,13 +376,20 @@ namespace fox::console
 		}
 
 	public:
+		/// @brief fox::console::console_manager singleton instance.
+		///	@note This function has to be implemented by the library user.
+		///	@returns Refernece to global command manager instance.
 		[[nodiscard]] static console_manager& instance();
 	};
 
+	/// @cond undocumented
 	namespace details
 	{
 		class console_base
 		{
+			// Access invoke
+			friend class ::fox::console::console_manager;
+
 		private:
 			std::string name_;
 			std::size_t number_of_parameters_;
@@ -354,12 +422,28 @@ namespace fox::console
 				console_manager::instance().unregister_command(this);
 			}
 
-		public:
+		protected:
 			virtual invoke_result invoke(std::span<std::string_view> arguments) = 0;
+
+		public:
+			/// @brief Get function name.
+			///	@returns Function name.
 			[[nodiscard]] const std::string& name() const noexcept { return name_; }
+
+			/// @brief Get number of parameters.
+			///	@returns Number of parameters.
 			[[nodiscard]] std::size_t number_of_parameters() const noexcept { return number_of_parameters_; }
+
+			/// @brief Get description.
+			///	@returns Description.
 			[[nodiscard]] const std::string& description() const noexcept { return description_; }
+
+			/// @brief Get minimal permission level.
+			///	@returns Permission level.
 			[[nodiscard]] std::size_t permission_level() const noexcept { return permission_level_; }
+
+			/// @brief Check if function's should be hidden.
+			///	@returns True if should be hidden, false otherwise.
 			[[nodiscard]] bool hidden() const noexcept { return hidden_; }
 		};
 
@@ -375,10 +459,13 @@ namespace fox::console
 			{ is >> v } -> std::same_as<std::istream&>;
 		};
 	}
+	/// @endcond undocumented
 
-	template<class T>
-	struct parser;
+	/// @brief User defined argument parser.
+	///	@tparam T Parsed type.
+	template<class T> struct parser;
 
+	/// @cond undocumented
 	namespace details
 	{
 		template<class T>
@@ -471,13 +558,20 @@ namespace fox::console
 		template<class T>
 		using parser = typename conditional_evaluated_parser<T>::type;
 	}
+	/// @endcond undocumented
 
+	/// @brief Specifies that a type is parsable - works with `fox::console::variable` and `fox::console::function`.
+	///	@tparam T Parsable type
 	template<class T>
 	concept parsable = ( details::default_parsable<T> || details::custom_parsable<T> );
 
-	template<class>
-	class function;
+	/// @brief /* undefined */
+	template<class> class function;
 
+	/// @brief Class template `fox::console::function` is a general purpose polymorphic console function registration proxy.
+	/// @details Instances of `fox::console::function` can store and be centrally (via console_manager) invoked.
+	///	@tparam R Function's return type
+	///	@tparam Args... Function's parameter types.
 	template<class R, class... Args>
 	requires (
 		(std::is_void_v<R> || parsable<R>) &&
@@ -511,6 +605,18 @@ namespace fox::console
 		}
 
 	public:
+		/// @brief Default constructor is deleted.
+		function() = delete;
+
+	public:
+		/// @brief Constructor that registers function within `fox::console::console_manager` with appropriate parameters.
+		///	@param name Function's name in the console.
+		///	@param func Callback functor.
+		///	@param description Function's description.
+		///	@param permission_level Minimum permission level that the function can be invoked with.
+		///	@param hidden Is function hidden from the search. Intended for GUI implementations.
+		///	@tparam Func Functor's type.
+		///	@exception register_exception Thrown if function is already registered.
 		template<class Func>
 		function(
 			std::string_view name, 
@@ -525,10 +631,11 @@ namespace fox::console
 
 		}
 
-	public:
+	protected:
 		[[nodiscard]] invoke_result
 		invoke(std::span<std::string_view> arguments) override
 		{
+			// Validate the number of arguments
 			if(std::size(arguments) != this->number_of_parameters)
 			{
 				return std::unexpected(
@@ -540,9 +647,11 @@ namespace fox::console
 				);
 			}
 
+			// Helpers used to track if all arguments were parsed properly during parameter pack expansion.
 			std::array<bool, sizeof...(Args)> all_valid;
 			std::array<const char*, sizeof...(Args)> type_names;
 
+			// Helper used for parameter pack expansion.
 			auto parse_type = [&]<std::size_t I>() -> std::tuple_element_t<I, std::tuple<std::unwrap_ref_decay_t<Args>...>>
 			{
 				using type = std::tuple_element_t<I, std::tuple<std::unwrap_ref_decay_t<Args>...>>;
@@ -558,11 +667,13 @@ namespace fox::console
 				return opt.value_or(type());
 			};
 
+			// Iterate over all argument types by index.
 			std::tuple<std::unwrap_ref_decay_t<Args>...> args = [&]<std::size_t... Is>(std::index_sequence<Is...>) -> std::tuple<std::unwrap_ref_decay_t<Args>...>
 			{
 				return std::make_tuple(parse_type.template operator() < Is > ()...);
 			}(std::index_sequence_for<Args...>{});
 
+			// Return an error if argument parsing failed.
 			for (auto&& [valid, string, type] : std::views::zip(all_valid, arguments, type_names))
 			{
 				if (valid) [[likely]]
@@ -577,18 +688,19 @@ namespace fox::console
 					);
 			}
 
+			// If return type is void then don't parse it
 			if constexpr (std::is_void_v<R>)
 			{
 				std::apply(function_, args);
 				return invoke_output{};
 			}
-			else
+			else // Parse non-void arguments
 			{
 				if (auto v = details::parser<R>{}(std::apply(function_, args)); v.has_value())
 				{
 					return v.value();
 				}
-				else
+				else // If parsing failed, return an error.
 				{
 					return invoke_error::unexpected(
 						invoke_error_return_value_parsing
@@ -601,37 +713,91 @@ namespace fox::console
 		}
 	};
 
+
 	template<parsable T>
 	class variable
 	{
+		// Variables are implemented by providing two overloads of the function with the name of the variable.
+		// One overload sets the value, another one returns it.
+		// Both overloads return the variable's values after their respective operations are complete.
 		T value_;
 		function<T()> getter_;
 		function<T(const T&)> setter_;
 
 	public:
+		/// @brief Constructor that registers variable within `fox::console::console_manager` with appropriate parameters.
+		/// @param name Variable's name.
+		/// @param default_val The value the variable should be initialized with.
+		///	@param description Variable's description.
+		///	@param permission_level Minimum permission level that the variable can be modified with.
+		///	@param hidden Is variable hidden from the search. Intended for GUI implementations.
+		///	@exception register_exception Thrown if variable is already registered.
 		variable(std::string_view name, const T& default_val = T(), std::string_view description = "", std::size_t permission_level = 0, bool hidden = false)
 			: value_(default_val)
-			, getter_(name, [this] () -> T { return value_; }, description, permission_level, hidden, details::console_entity_type::variable_getter)
+			, getter_(name, [this] () -> T { return value_; }, description, static_cast<std::size_t>(0), hidden, details::console_entity_type::variable_getter)
 			, setter_(name, [this] (const T& v) -> T { return value_ = v; }, description, permission_level, hidden, details::console_entity_type::variable_setter)
 		{}
 
 	public:
+		/// @brief Variable type conversion operator.
+		///	@returns Reference to managed variable.
 		operator T& () noexcept { return value_; }
+
+		/// @brief Variable type conversion operator.
+		///	@returns Value of the managed variable.
 		operator const T& () const noexcept { return value_; }
 
 	public:
+		/// @brief Variable value getter.
+		///	@returns Value of the managed variable.
 		[[nodiscard]] auto get() noexcept -> T& { return value_; }
+
+		/// @brief Variable value getter.
+		///	@returns Reference to managed variable.
 		[[nodiscard]] auto get() const noexcept -> const T& { return value_; }
+
+		/// @brief Variable value setter.
+		///	@param v New value of the variable.
+		auto set(const T& v) const noexcept -> void { value_ = v; }
+
+		/// @brief Variable value setter.
+		///	@param v New value of the variable.
+		auto set(T&& v) const noexcept -> void { value_ = std::move(v); }
+
+		/// @brief Get variable's name.
+		///	@returns Function name.
 		[[nodiscard]] auto name() const noexcept -> const std::string& { return getter_.name(); }
+
+		/// @brief Get description.
+		///	@returns Description.
 		[[nodiscard]] auto description() const noexcept -> const std::string& { return getter_.description(); }
-		[[nodiscard]] auto permission_level() const noexcept -> std::size_t { return getter_.permission_level(); }
+
+		/// @brief Get minimal permission level.
+		///	@returns Permission level.
+		[[nodiscard]] auto permission_level() const noexcept -> std::size_t { return setter_.permission_level(); }
+
+		/// @brief Check if variable should be hidden.
+		///	@returns True if should be hidden, false otherwise.
 		[[nodiscard]] auto hidden() const noexcept -> bool { return getter_.hidden(); }
+
+		/// @brief Get underlying getter function.
+		///	@returns Reference to getter function.
 		[[nodiscard]] auto getter() noexcept -> decltype(auto) { return getter_; }
+
+		/// @brief Get underlying setter function.
+		///	@returns Reference to setter function.
 		[[nodiscard]] auto setter() noexcept -> decltype(auto) { return setter_; }
+
+		/// @brief Get underlying getter function.
+		///	@returns Value of the getter function.
 		[[nodiscard]] auto getter() const noexcept -> decltype(auto) { return getter_; }
+
+		/// @brief Get underlying setter function.
+		///	@returns Value of the setter function.
 		[[nodiscard]] auto setter() const noexcept -> decltype(auto) { return setter_; }
 	};
 
+	/// @cond undocumented
 	inline void console_manager::register_command(std::string_view name, details::console_base* ptr)
 	{
 		auto [first, last] = commands_.equal_range(name);
@@ -685,6 +851,7 @@ namespace fox::console
 			}
 		);
 	}
+	/// @endcond undocumented
 }
 
 #endif
