@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(convar)
+project(console)
 
 if (PROJECT_IS_TOP_LEVEL)
     set_property(GLOBAL PROPERTY USE_FOLDERS ON)
@@ -41,12 +41,13 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 include(FetchContent)
 add_subdirectory("include")
-add_library(fox::convar ALIAS convar)
+add_library(fox::console ALIAS console)
 
 if (FOX_CONVAR_BUILD_SAMPLES)
 	add_subdirectory("sample")
 endif()
 
 if (FOX_CONVAR_BUILD_TESTS)
+	enable_testing()
 	add_subdirectory("test")
 endif()

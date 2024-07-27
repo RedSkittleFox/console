@@ -1,26 +1,31 @@
-#include <fox/convar.hpp>
+#include <fox/console.hpp>
 #include <iostream>
 
-[[nodiscard]] inline fox::convar::console_manager& fox::convar::console_manager::instance()
+[[nodiscard]] inline fox::console::console_manager& fox::console::console_manager::instance()
 {
-	static fox::convar::console_manager mgr;
+	static fox::console::console_manager mgr;
 	return mgr;
 }
 
-fox::convar::convar<int> test_var("var", 1);
-fox::convar::concommand<int(int)> test_func("func", [](int v) -> int { return v * 2; } );
+fox::console::variable<int> test_var("var", 1);
+fox::console::function<int(int)> test_func("func", [](int v) -> int { return v * 2; } );
 
 int main()
 {
 	using namespace std::string_view_literals;
 
-	std::cout << fox::convar::console_manager::instance().execute("var", {}).value_or("<error>") << '\n';
+	namespace foxc = fox::console;
+	auto print_error = [](auto&& error) -> foxc::invoke_result { return foxc::invoke_output{ "Error: " + error.message() }; };
+
+	auto& cm = fox::console::console_manager::instance();
+
+	std::cout << cm.invoke("var", {}).or_else(print_error).value().out << '\n';
 
 	std::array params{ "amogus"sv };
-	std::cout << fox::convar::console_manager::instance().execute("var", params).value_or("<error>") << '\n';
+	std::cout << cm.invoke("var", params).or_else(print_error).value().out << '\n';
 
-	std::cout << fox::convar::console_manager::instance().execute("var", {}).value_or("<error>") << '\n';
+	std::cout << cm.invoke("var", {}).or_else(print_error).value().out << '\n';
 
 	std::vector params2{"2"sv};
-	std::cout << fox::convar::console_manager::instance().execute("func", params2).value_or("<error>") << '\n';
+	std::cout << cm.invoke("func", params2).or_else(print_error).value().out << '\n';
 }

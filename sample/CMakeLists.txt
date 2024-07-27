@@ -7,25 +7,27 @@ set(sources
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${sources})
 
 add_executable(
-    convar-demo
+    console-demo
     ${sources}
 )
 
 if(MSVC)
     target_compile_options(
-	convar-demo
-        PRIVATE /WX # all warnings as errors 
-        PRIVATE /MP # multi-processor compilation
+	    console-demo
+		PRIVATE /W4 
+		PRIVATE /MP 
+		PRIVATE /arch:AVX2
+		PRIVATE /WX
     )
 endif()
 
 target_include_directories(
-    convar-demo
+    console-demo
     PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 target_link_libraries(
-    convar-demo
-    convar
+    console-demo
+    console
 )
