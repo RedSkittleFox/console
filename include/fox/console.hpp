@@ -12,16 +12,53 @@
 #include <utility>
 #include <unordered_map>
 #include <ranges>
-#include <stdexcept>
 #include <functional>
 #include <sstream>
 #include <algorithm>
 #include <numeric>
 #include <initializer_list>
 #include <variant>
+#include <cassert>
+
+#ifdef FOX_CONSOLE_ENABLE_EXCEPTIONS
+#include <stdexcept>
+#endif
+
+#ifdef FOX_CONSOLE_THREAD_SAFE
+#include <mutex>
+
+#ifndef FOX_CONSOLE_THREAD_SAFE_MUTEX
+#define FOX_CONSOLE_THREAD_SAFE_MUTEX(X) mutable std::mutex X;
+#endif
+
+#ifndef FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK
+#define FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK(LOCK, X) std::unique_lock<std::mutex> LOCK(X);
+#endif
+
+#ifndef FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK_UNLOCK
+#define FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK_UNLOCK(LOCK) LOCK.unlock();
+#endif
+
+#else
+
+#ifndef FOX_CONSOLE_THREAD_SAFE_MUTEX
+#define FOX_CONSOLE_THREAD_SAFE_MUTEX(X)
+#endif
+
+#ifndef FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK
+#define FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK(LOCK, X)
+#endif
+
+#ifndef FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK_UNLOCK
+#define FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK_UNLOCK(LOCK)
+#endif
+
+#endif
 
 namespace fox::console
 {
+
+#ifdef FOX_CONSOLE_ENABLE_EXCEPTIONS
 	/// @brief Defines a type of object to be thrown as exception.
 	/// It reports errors that are a consequence of invalid console::variable or console::function registration.
 	class register_exception : public std::runtime_error
@@ -29,6 +66,7 @@ namespace fox::console
 	public:
 		using runtime_error::runtime_error;
 	};
+#endif
 
 	/// @cond undocumented
 	namespace details
@@ -176,6 +214,7 @@ namespace fox::console
 	{
 		friend class details::console_base;
 
+		FOX_CONSOLE_THREAD_SAFE_MUTEX(mutex_)
 		std::unordered_multimap<std::string_view, details::console_base*> commands_;
 
 	public:
@@ -200,6 +239,7 @@ namespace fox::console
 		~console_manager() noexcept = default;
 
 	private:
+		// These two are not thread safe, lock mutex_ externally, done for consistency's sake
 		void register_command(std::string_view name, details::console_base* ptr);
 		void unregister_command(details::console_base* ptr) noexcept;
 
@@ -255,125 +295,7 @@ namespace fox::console
 		///	@returns std::vector of `std::expected<invoke_output, invoke_error>` of resulting function calls.
 		[[nodiscard]] std::vector<invoke_result> execute(std::string_view cmd, 
 			std::size_t permissions = std::numeric_limits<std::size_t>::max()
-		)
-		{
-			// White space characters
-			constexpr std::string_view ws = " \t\n\r\f\v";
-
-			std::vector<invoke_result> invoke_results;
-
-			// Used to hold ownership in case of arg modification.
-			// We usually use the original string though.
-			std::vector<std::string> tmp_args_buffer; 
-			std::vector<std::string_view> args;
-
-			std::size_t k = 0;
-			std::size_t i = 0;
-
-			// Tries to push currently parsed string into vector
-			auto push_arg = [&]()
-				{
-					std::string_view sv = cmd.substr(k, i - k);
-
-					// Trim the string
-					if(auto e = sv.find_first_not_of(ws); e != std::string_view::npos)
-						sv.remove_prefix(e);
-					if(auto e = sv.find_last_not_of(ws); e != std::string_view::npos)
-						sv = sv.substr(0, e + 1);
-
-					// Don't insert empty (after the trim)
-					if(!std::empty(sv))
-						args.push_back(sv);
-				};
-
-			bool state_escaped = false;
-			for(; i < std::size(cmd); ++i)
-			{
-				const char c = cmd[i];
-				if(state_escaped == false) // Parse if outside of quotation marks
-				{
-					if(c == '"')
-					{
-						push_arg();
-						state_escaped = true;
-						k = i + 1;
-					}
-					else if(c == ';')
-					{
-						push_arg();
-						k = i + 1;
-
-						if (!std::empty(args))
-						{
-							invoke_results.emplace_back(
-								this->invoke(args[0], std::span<std::string_view>(std::data(args) + 1, std::size(args) - 1), permissions)
-							);
-
-							args.clear();
-							tmp_args_buffer.clear();
-						}
-					}
-					else if (ws.find_first_of(c) != std::string_view::npos)
-					{
-						push_arg();
-						k = i + 1;
-					}
-				}
-				else // inside quotation marks
-				{
-					// Leave only if \", make sure \ itself isn't escaped - \\"
-					if (((i < 2 || cmd[i - 2] == '\\' ) || cmd[i - 1] != '\\') && cmd[i] == '"')
-					{
-						// Don't use push_arg(), we don't want to trim the string
-						std::string& str = tmp_args_buffer.emplace_back(static_cast<std::string>(cmd.substr(k, i - k)));
-
-						// Check if last buffer has escape sequences and if so remove them
-						for(std::size_t j = {}; j < std::size(str); ++j)
-						{
-							if(j + 1 < std::size(str) && str[j] == '\\')
-							{
-								str[j] = '\0'; // Delete these later
-
-								switch (str[j + 1]) // 
-								{
-								case '\n':
-									str[j + 1] = '\n';
-									break;
-								case '\t':
-									str[j + 1] = '\t';
-									break;
-								default:
-									break;
-								}
-
-								j = j + 1;
-							}
-						}
-
-						std::erase(str, '\0');
-
-						args.push_back(str);
-
-						state_escaped = false;
-						k = i + 1;
-					}
-
-				}
-			}
-
-			// Try to push remaining arg onto the stack and invoke the command if any left
-			push_arg();
-			if(!std::empty(args))
-			{
-				invoke_results.emplace_back(
-					this->invoke(args[0], std::span<std::string_view>(std::data(args) + 1, std::size(args) - 1), permissions)
-				);
-
-				args.clear();
-			}
-
-			return invoke_results;
-		}
+		);
 
 	public:
 		/// @brief fox::console::console_manager singleton instance.
@@ -391,20 +313,22 @@ namespace fox::console
 			friend class ::fox::console::console_manager;
 
 		private:
-			std::string name_;
-			std::size_t number_of_parameters_;
-			std::string description_;
-			std::size_t permission_level_;
-			console_entity_type type_;
-			bool hidden_;
+			const std::string name_;
+			const std::size_t number_of_parameters_;
+			const std::string description_;
+			const std::size_t permission_level_;
+			const console_entity_type type_;
+			const bool hidden_;
+
+			FOX_CONSOLE_THREAD_SAFE_MUTEX(mutex_)
 
 		public:
 			console_base() = delete;
 			console_base(const console_base&) = delete;
 			console_base& operator=(const console_base&) = delete;
 
-			console_base(console_base&&) noexcept = default;
-			console_base& operator=(console_base&&) noexcept = default;
+			console_base(console_base&&) noexcept = delete;
+			console_base& operator=(console_base&&) noexcept = delete;
 
 			console_base(std::string_view name, std::size_t number_of_parameters, std::string_view description, std::size_t permission_level, console_entity_type type, bool hidden)
 				: name_(static_cast<std::string>(name))
@@ -414,11 +338,15 @@ namespace fox::console
 				, type_(type)
 				, hidden_(hidden)
 			{
+				FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK(lock, console_manager::instance().mutex_)
 				console_manager::instance().register_command(name_, this);
 			}
 
 			virtual ~console_base() noexcept
 			{
+				// We need to first lock the mutex of the console manager in order to avoid possible recursive lock
+				FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK(lock1, console_manager::instance().mutex_)
+				FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK(lock2, mutex_) // Stall destructor if object is being called
 				console_manager::instance().unregister_command(this);
 			}
 
@@ -571,7 +499,7 @@ namespace fox::console
 	/// @brief Class template `fox::console::function` is a general purpose polymorphic console function registration proxy.
 	/// @details Instances of `fox::console::function` can store and be centrally (via console_manager) invoked.
 	///	@tparam R Function's return type
-	///	@tparam Args... Function's parameter types.
+	///	@tparam Args Function's parameter types.
 	template<class R, class... Args>
 	requires (
 		(std::is_void_v<R> || parsable<R>) &&
@@ -601,7 +529,7 @@ namespace fox::console
 		: console_base(name, number_of_parameters, description, permission_level, type, hidden)
 		, function_(std::forward<Func>(func))
 		{
-
+			
 		}
 
 	public:
@@ -720,7 +648,8 @@ namespace fox::console
 		// Variables are implemented by providing two overloads of the function with the name of the variable.
 		// One overload sets the value, another one returns it.
 		// Both overloads return the variable's values after their respective operations are complete.
-		T value_;
+		FOX_CONSOLE_THREAD_SAFE_MUTEX(mutex_)
+		T value_; // This one should be destroyed last 
 		function<T()> getter_;
 		function<T(const T&)> setter_;
 
@@ -734,11 +663,13 @@ namespace fox::console
 		///	@exception register_exception Thrown if variable is already registered.
 		variable(std::string_view name, const T& default_val = T(), std::string_view description = "", std::size_t permission_level = 0, bool hidden = false)
 			: value_(default_val)
-			, getter_(name, [this] () -> T { return value_; }, description, static_cast<std::size_t>(0), hidden, details::console_entity_type::variable_getter)
-			, setter_(name, [this] (const T& v) -> T { return value_ = v; }, description, permission_level, hidden, details::console_entity_type::variable_setter)
+			, getter_(name, [this] () -> T { FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK(lock, mutex_) return value_; }, description, static_cast<std::size_t>(0), hidden, details::console_entity_type::variable_getter)
+			, setter_(name, [this] (const T& v) -> T { FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK(lock, mutex_) return value_ = v; }, description, permission_level, hidden, details::console_entity_type::variable_setter)
 		{}
 
+
 	public:
+#ifndef FOX_CONSOLE_THREAD_SAFE
 		/// @brief Variable type conversion operator.
 		///	@returns Reference to managed variable.
 		operator T& () noexcept { return value_; }
@@ -747,22 +678,31 @@ namespace fox::console
 		///	@returns Value of the managed variable.
 		operator const T& () const noexcept { return value_; }
 
-	public:
 		/// @brief Variable value getter.
-		///	@returns Value of the managed variable.
+		///	@returns Reference to the managed variable.
 		[[nodiscard]] auto get() noexcept -> T& { return value_; }
 
 		/// @brief Variable value getter.
-		///	@returns Reference to managed variable.
+		///	@returns Value of the managed variable.
 		[[nodiscard]] auto get() const noexcept -> const T& { return value_; }
 
-		/// @brief Variable value setter.
-		///	@param v New value of the variable.
-		auto set(const T& v) const noexcept -> void { value_ = v; }
+#else
+		/// @brief Variable type conversion operator.
+		///	@returns Value of the managed variable.
+		operator T () const noexcept { FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK(lock, mutex_) return value_; }
+
+		/// @brief Variable value getter.
+		///	@returns Value of the managed variable.
+		[[nodiscard]] auto get() const noexcept -> T { FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK(lock, mutex_) return value_; }
+#endif
 
 		/// @brief Variable value setter.
 		///	@param v New value of the variable.
-		auto set(T&& v) const noexcept -> void { value_ = std::move(v); }
+		auto set(const T& v) const noexcept -> void { FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK(lock, mutex_) value_ = v; }
+
+		/// @brief Variable value setter.
+		///	@param v New value of the variable.
+		auto set(T&& v) const noexcept -> void { FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK(lock, mutex_) value_ = std::move(v); }
 
 		/// @brief Get variable's name.
 		///	@returns Function name.
@@ -800,6 +740,8 @@ namespace fox::console
 	/// @cond undocumented
 	inline void console_manager::register_command(std::string_view name, details::console_base* ptr)
 	{
+		// Mutex locked by the caller!
+
 		auto [first, last] = commands_.equal_range(name);
 
 		for(const auto& c : std::ranges::subrange(first, last) | std::views::values)
@@ -807,9 +749,14 @@ namespace fox::console
 			if(c->number_of_parameters() == ptr->number_of_parameters())
 				// Same signature registered twice
 			{
+#ifdef FOX_CONSOLE_ENABLE_EXCEPTIONS
 				std::ostringstream oss;
 				oss << "Function '" << c->name() << "' taking '" << c->number_of_parameters() << "' already exists.";
 				throw register_exception(oss.str());
+#else
+				assert(!"Tried to register already existing command. Terminating...");
+				std::abort();
+#endif
 			}
 		}
 			
@@ -818,12 +765,15 @@ namespace fox::console
 
 	inline void console_manager::unregister_command(details::console_base* ptr) noexcept
 	{
+		// Mutex locked by the caller!
 		std::erase_if(commands_, [=](const auto& p) -> bool { return p.second == ptr; });
 	}
 
 	inline invoke_result
 	console_manager::invoke(std::string_view command, std::span<std::string_view> arguments, std::size_t permissions)
 	{
+		FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK(lock1, mutex_) // Lock console manager which is managing the queue first
+
 		const auto r = commands_.equal_range(command);
 
 		for (auto c : std::ranges::subrange(r.first, r.second) | std::views::values)
@@ -841,6 +791,12 @@ namespace fox::console
 					}
 				);
 
+			// Lock the function's mutex (needed to block the destructor from deleting the object whilst it's being called)
+			FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK(lock2, c->mutex_);
+
+			// Unlock the lock of console manager
+			FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK_UNLOCK(lock1)
+
 			return c->invoke(arguments);
 		}
 		
@@ -851,7 +807,145 @@ namespace fox::console
 			}
 		);
 	}
+
+	inline std::vector<invoke_result>
+	console_manager::execute(std::string_view cmd,
+		std::size_t permissions)
+	{
+		// White space characters
+		constexpr std::string_view ws = " \t\n\r\f\v";
+
+		std::vector<invoke_result> invoke_results;
+
+		// Used to hold ownership in case of arg modification.
+		// We usually use the original string though.
+		std::vector<std::string> tmp_args_buffer;
+		std::vector<std::string_view> args;
+
+		std::size_t k = 0;
+		std::size_t i = 0;
+
+		// Tries to push currently parsed string into vector
+		auto push_arg = [&]()
+			{
+				std::string_view sv = cmd.substr(k, i - k);
+
+				// Trim the string
+				if (auto e = sv.find_first_not_of(ws); e != std::string_view::npos)
+					sv.remove_prefix(e);
+				if (auto e = sv.find_last_not_of(ws); e != std::string_view::npos)
+					sv = sv.substr(0, e + 1);
+
+				// Don't insert empty (after the trim)
+				if (!std::empty(sv))
+					args.push_back(sv);
+			};
+
+		bool state_escaped = false;
+		for (; i < std::size(cmd); ++i)
+		{
+			const char c = cmd[i];
+			if (state_escaped == false) // Parse if outside of quotation marks
+			{
+				if (c == '"')
+				{
+					push_arg();
+					state_escaped = true;
+					k = i + 1;
+				}
+				else if (c == ';')
+				{
+					push_arg();
+					k = i + 1;
+
+					if (!std::empty(args))
+					{
+						invoke_results.emplace_back(
+							this->invoke(args[0], std::span<std::string_view>(std::data(args) + 1, std::size(args) - 1), permissions)
+						);
+
+						args.clear();
+						tmp_args_buffer.clear();
+					}
+				}
+				else if (ws.find_first_of(c) != std::string_view::npos)
+				{
+					push_arg();
+					k = i + 1;
+				}
+			}
+			else // inside quotation marks
+			{
+				// Leave only if \", make sure \ itself isn't escaped - \\"
+				if (((i < 2 || cmd[i - 2] == '\\') || cmd[i - 1] != '\\') && cmd[i] == '"')
+				{
+					// Don't use push_arg(), we don't want to trim the string
+					std::string& str = tmp_args_buffer.emplace_back(static_cast<std::string>(cmd.substr(k, i - k)));
+
+					// Check if last buffer has escape sequences and if so remove them
+					for (std::size_t j = {}; j < std::size(str); ++j)
+					{
+						if (j + 1 < std::size(str) && str[j] == '\\')
+						{
+							str[j] = '\0'; // Delete these later
+
+							switch (str[j + 1]) // 
+							{
+							case '\n':
+								str[j + 1] = '\n';
+								break;
+							case '\t':
+								str[j + 1] = '\t';
+								break;
+							default:
+								break;
+							}
+
+							j = j + 1;
+						}
+					}
+
+					std::erase(str, '\0');
+
+					args.push_back(str);
+
+					state_escaped = false;
+					k = i + 1;
+				}
+
+			}
+		}
+
+		// Try to push remaining arg onto the stack and invoke the command if any left
+		push_arg();
+		if (!std::empty(args))
+		{
+			invoke_results.emplace_back(
+				this->invoke(args[0], std::span<std::string_view>(std::data(args) + 1, std::size(args) - 1), permissions)
+			);
+
+			args.clear();
+		}
+
+		return invoke_results;
+	}
 	/// @endcond undocumented
 }
+
+#ifdef FOX_CONSOLE_THREAD_SAFE
+
+#ifdef FOX_CONSOLE_THREAD_SAFE_MUTEX
+#undef FOX_CONSOLE_THREAD_SAFE_MUTEX
+#endif
+
+#ifdef FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK
+#undef FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK
+#endif
+
+#ifndef FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK_UNLOCK
+#undef FOX_CONSOLE_THREAD_SAFE_UNIQUE_LOCK_UNLOCK
+#endif
+
+#endif
 
 #endif
