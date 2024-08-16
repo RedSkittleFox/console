@@ -25,7 +25,7 @@ int main()
 	using namespace std::string_view_literals;
 	namespace foxc = fox::console;
 
-	auto print_error = [](auto&& error) -> foxc::invoke_result { return foxc::invoke_output{ "Error: " + error.message() }; };
+	auto print_error = [](auto&& error) -> foxc::invoke_result { return foxc::invoke_output{ "Error: " + error.message(), {} }; };
 
 	auto& cm = fox::console::console_manager::instance();
 

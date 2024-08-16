@@ -115,7 +115,7 @@ namespace fox::console
 		{
 			std::ostringstream ss;
 			ss << "test_type_1: " << v.v;
-			return invoke_output{ ss.str() };
+			return invoke_output{ ss.str(), {} };
 		}
 
 		[[nodiscard]] std::optional<test_type_1> operator()(std::string_view sv) const

@@ -317,7 +317,7 @@ namespace fox::console
 			const std::size_t number_of_parameters_;
 			const std::string description_;
 			const std::size_t permission_level_;
-			const console_entity_type type_;
+			[[maybe_unused]] const console_entity_type type_;
 			const bool hidden_;
 
 			FOX_CONSOLE_THREAD_SAFE_MUTEX(mutex_)
@@ -415,7 +415,7 @@ namespace fox::console
 
 				std::ostringstream ss;
 				ss << v;
-				return invoke_output{ ss.str() };
+				return invoke_output{ ss.str(), {} };
 			}
 
 			[[nodiscard]] std::optional<T> operator()(std::string_view sv) const
@@ -445,7 +445,7 @@ namespace fox::console
 		{
 			[[nodiscard]] std::optional<invoke_output> operator()(const std::string& v) const
 			{
-				return invoke_output{ v };
+				return invoke_output{ v, {} };
 			}
 
 			[[nodiscard]] std::optional<std::string> operator()(std::string_view sv) const
