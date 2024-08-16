@@ -18,19 +18,21 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 set(sources 
-    "${CMAKE_CURRENT_SOURCE_DIR}/convar_test.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/console_test.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/variable_test.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/function_test.cc"
 )
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${sources})
 
 add_executable(
-    convar-test
+    console-test
     ${sources}
 )
 
 if(MSVC)
 	target_compile_options(
-	    convar-test
+	    console-test
 		PRIVATE /W4 
 		PRIVATE /MP 
 		PRIVATE /arch:AVX2
@@ -40,14 +42,14 @@ if(MSVC)
 endif()
 
 target_link_libraries(
-    convar-test
+    console-test
     GTest::gtest_main
     GTest::gmock_main
-    convar
+    console
 )
 
 include(GoogleTest)
-gtest_discover_tests(convar-test)
+gtest_discover_tests(console-test)
 
 if (PROJECT_IS_TOP_LEVEL)
     set_target_properties(gtest_main PROPERTIES FOLDER "vendor")
