@@ -1,3 +1,6 @@
+[![CMake MSVC Windows Build and Test](https://github.com/RedSkittleFox/console/actions/workflows/cmake-msvc-windows.yml/badge.svg)](https://github.com/RedSkittleFox/console/actions/workflows/cmake-msvc-windows.yml)
+[![CMake CLANG Windows Build and Test](https://github.com/RedSkittleFox/console/actions/workflows/cmake-clang-windows.yml/badge.svg)](https://github.com/RedSkittleFox/console/actions/workflows/cmake-clang-windows.yml)
+
 # console
 Console is a header only library that provides a simple integration to use integration between console and code nevironment.
 
